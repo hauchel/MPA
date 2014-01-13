@@ -1,4 +1,4 @@
-; Some Macros to ease Port settings
+; Ease Port settings
 .MACRO PortOutB ; num on B as output to zero
 	sbi DDRB, @0
 	cbi PORTB,  @0
@@ -19,6 +19,7 @@
 	sbi PORTD, @0
 .ENDMACRO
 
+; Index register handling
 .MACRO SetXPtr ; point X to RAM
 	ldi     XL, LOW(@0)
      ldi     XH, HIGH(@0)
@@ -53,4 +54,16 @@
 .MACRO SetZCode ;point X to Flash
         ldi     ZL, LOW(2*@0)
         ldi     ZH, HIGH(2*@0)
+.ENDMACRO
+
+.MACRO PushYtmp
+	push YL
+	push YH
+	push tmp
+.ENDMACRO
+
+.MACRO PopYtmp
+	pop tmp
+	pop YH
+	pop YL
 .ENDMACRO
