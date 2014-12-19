@@ -7,9 +7,8 @@ class gdb():
     def __init__(self):
         self.db = mdb.connect('127.0.0.1', 'root', '', 'greed')
         self.cs= self.db.cursor()
-        self.cst= self.db.cursor() # task needs seperate
         self.verbose=False
-       # self.verbose=True
+        #self.verbose=True
         
     def zeit(self):
         return time.strftime("'%Y %b %d  %H:%M:%S'", time.localtime())
@@ -33,11 +32,22 @@ class gdb():
         self.say ("answer: %s" % str(result))
         self.db.commit()
         return result
-
+    
+    
     def execc(self,query):
         self.say ("execc: "+query)     
-        self.cs.execute(query)
+        tmp=self.cs.execute(query)
         self.db.commit()
+        return tmp
+
+    def getManyOne(self,query):
+        "returns on col as list"
+        tmp=self.fetch99(query)
+        w=[]
+        for t in tmp:
+            ts=str(t[0])
+            w.append(ts)
+        return w
 
     def existIp(self,ip):
         return self.fetch1("SELECT * from ip where ip='"+ip+"'")
@@ -69,7 +79,6 @@ class gdb():
         zeit=time.strftime("%Y %b %d  %H:%M:%S", time.localtime())
         self.execc("INSERT INTO useron values ('%s','%s')" %(user,zeit) )
 
-        
     def setPlayers(self,plis):
         tmp="INSERT IGNORE INTO players (name) VALUES "
         for t in plis: 
@@ -86,6 +95,43 @@ class gdb():
         tmp=tmp[:-1]
         self.execc(tmp)  
     
+    def setTop(self,user,cur):
+        self.execc("Delete from top")
+        tmp="where user ='%s' and cur !='%s'" %(user,cur)
+        self.execc("insert into top (cur) select cur from have "+tmp+" order by qty desc limit 9")
+        
+    def getTop(self):
+        return self.getManyOne("select cur from top")
+    
+    def delTop(self,cu):
+        self.execc("delete from top where cur='%s'"%cu)
+        
+    def getValua(self):
+        plr= self.getManyOne("select distinct cur from players")
+        print plr
+        val= self.getManyOne("select cur from coins") 
+        print val
+        for cu in plr:
+            try:
+                val.remove(cu)
+            except ValueError:
+                print "please check players currency "+str(cu)
+        return val
+        
+    def createSummary(self):
+        self.execc("delete from summary;")
+        self.execc("insert into summary (cur) select distinct cur from have;")
+        tot = "update summary set total= "
+        for user in self.getManyOne("select user from users"):
+            tmp=" update summary, have set summary."+user+" = have.qty where have.user='"
+            tmp+= user +"' and have.cur=summary.cur"
+            tot+=user+"+"
+            self.execc(tmp)
+        tot=tot[:-1]
+        self.execc(tot)
+        self.execc("update summary,players set summary.player=players.name where summary.cur=players.cur")
+        self.execc("update summary,coins set summary.curLong=coins.curLong where summary.cur=coins.cur")
+        
     def getPlayersCur(self,plis):
         r=[]
         for t in plis: 
@@ -112,14 +158,18 @@ class gdb():
 
 if __name__ == "__main__":
     k=gdb()  
-
-    if 1:
+    print k.getValua()
+    if 0:
         print k.getPlayersCur([u'greed', u'capelca', u'Bleech', u'R2D2', u'Reb Rote'])
     if 0:
         usr=k.getUserOn()
         k.testUp(usr)
     if 0:
         k.setUserOn('xxx')
-        
+    if 0:
+        k.setTop('R2D2','AR')
+        print k.getTop()
+    if 1:
+        k.createSummary()        
     #tmp=k.getUserData(usr)
     #t=k.getWanted('EC')

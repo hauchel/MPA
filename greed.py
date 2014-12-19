@@ -12,8 +12,15 @@ class greed():
         self.base_url = "http://www.greedgame.com/"
         #self.verificationErrors = []
         #self.accept_next_alert = True
-        self.dbquery=True
-
+        self.order=[]
+        self.have={}        # set in worldbank, 0 added during makeneed
+        self.low=True
+        self.offered=[]
+        self.valua=[]       # those cu not having a player assigned
+        self.need={}        # qty needed
+        self.want=[]
+        self.bought=[]      # key to bought to avoid 
+        
     def printSetUp(self):
         print "%s %s ty=%s ord=%d need=%d exc=%d oth=%d act=%d" %(self.myuser,self.mycu,\
             self.mytyp,self.ordqty,self.needqty,self.excqty,self.othqty,self.action)
@@ -31,14 +38,8 @@ class greed():
         self.action=se[8]        
         self.printSetUp()
         self.want=self.db.getWanted(self.mycu)
-        self.order=[]
-        self.have={}
+        self.valua=self.db.getValua()
        
-        self.low=True
-        self.offered=[]
-        
- 
-
     def evalPlayer(self,x):
         "returns all player "
         x=x.find_elements_by_class_name("player")
@@ -121,6 +122,7 @@ class greed():
             self.offered.append(cu)  
         
     def makeneed(self):
+        " those offered minus having"
         self.need={}
         for cu in self.offered:
             try:
@@ -131,6 +133,18 @@ class greed():
             if tmp<0:
                 tmp=0
             self.need[cu]=tmp
+
+    def value(self):
+        self.need={}
+        for cu in self.offered:
+            try:
+                tmp = self.needqty-self.have[cu]  
+            except Exception as inst:
+                self.have[cu]=0
+                tmp=self.needqty
+            if tmp<0:
+                tmp=0
+            self.need[cu]=tmp            
             
     def checkbuy(self):
         try:
@@ -161,21 +175,34 @@ class greed():
             if givcu==self.mycu:
                 dlt=0
             else:
-                dlt=5
+                if gethav==0:
+                    dlt=0
+                else:
+                    dlt=5
             getnew=gethav+getqty
             givnew=givhav-givqty                
             print "->  %2d  vs %2d " %(getnew,givnew),
+            if givcu in self.valua:
+                print "valu ",
+                if gethav !=0:
+                    print "da"
+                    continue
+                
+            bou=getcu+givcu+str(getqty)+str(givqty)
+            if bou in self.bought:
+                print "key already bought "+bou
+                continue
             if self.low:
                 if gethav > 1:
                     print " Low have"
                     continue
                 if getnew > 3:
-                    print " Low nw"
+                    print " Low new"
                     continue
             if givnew > getnew+dlt:
-                    print " buy"
                     bu=r.find_element_by_link_text("buy")
-                    print bu.rect
+                    print "buy key "+bou
+                    self.bought.append(bou)
                     bu.click()
                     return getqty
             print
@@ -204,15 +231,14 @@ class greed():
             givcu=y[1].get_attribute("data-coin")  
             #print "checkother "+str(getqty)+" "+getcu+" give "+givcu +" "+str(givqty)
         self.makeneed()                
-            
-    def trading(self):
-        d = self.driver
-        d.get(self.base_url+"tradingplace")
+    
+    def getMyOrders(self):
+        self.driver.get(self.base_url+"tradingplace")
         self.order=[]
         try:
             rem=self.driver.find_elements_by_class_name("info")
         except Exception as inst:
-            print "trading info: "+str(inst.args)
+            print "getMyOrders info: "+str(inst.args)
             rem=[]
         print "Ordered: ",
         for r in rem:       
@@ -222,26 +248,31 @@ class greed():
             print cu+" ", 
             self.order.append(cu)
         print
+
+        
+    def trading(self):
+        self.getMyOrders()
         self.checkother()
         return self.checkbuy()
                     
-    def neworder(self,qty,cu):
+    def neworder(self,qty,givcu,getcu):
         d = self.driver
         d.get(self.base_url+"newoffer")
-        x=d.find_element_by_name('M['+self.mycu+']')
+        x=d.find_element_by_name('M['+givcu+']')
         x.clear()
-        print "neworder %d  %s" %(qty,cu)
+        print "neworder %d  %s %s" %(qty,givcu,getcu)
         if self.low:
             if qty>2: qty=2
         tmp=str(qty)
         x.send_keys(tmp)
-        x=d.find_element_by_name("Y["+cu+"]")
+        x=d.find_element_by_name("Y["+getcu+"]")
         x.clear()
         x.send_keys(tmp)
         d.find_element_by_xpath("//button[@type='submit']").click()
         time.sleep(random.randint(10,20))
     
-
+    def neworderOwn(self,qty,cu):
+        self.neworder(qty,self.mycu,cu)
             
     def removelastorder(self):
         self.driver.get(self.base_url+"tradingplace")
@@ -250,10 +281,11 @@ class greed():
         except Exception as inst:
             print "No Orders to remove: "+str(inst.args)
             return 0
-        print "orders found %d "%len(rem)
+        print "remove last, found %d "%len(rem)
         l=len(rem)
         if l== 0: return 0
         rem[l-1].click()
+        self.getMyOrders()
         return l-1
     
     def removeall(self):
@@ -263,14 +295,19 @@ class greed():
     
     def offqty(self,have,need):
         if have <3:
-            return 2
-        if have <10:
-            return 5
+            t= 2
+        elif have <8:
+            t= 4
+        elif have <18:
+            t= 6
         else:
-            return 9
+            t=12
+        if t>self.ordqty:
+            t=self.ordqty
+        return t
             
     def addemO(self):
-        "order by Online, return number of orders in book"
+        "order by players Online, return number of orders in book"
         nord=len(self.order)
         curs=(self.getCursOn())    
         for cu in curs:
@@ -279,22 +316,22 @@ class greed():
             if cu==self.mycu:
                 continue
             if cu in self.order:
-                print "addemO already ordered "+cu
+                print "addemO %s already ordered "%cu
                 continue
             if cu not in self.want:
-                print "addemO not wanted "+cu
+                print "addemO %s not wanted "%cu
                 continue
             if cu in self.have:
                 hav=self.have[cu]
             else:
                 hav=0
-            print "addemO   %s have %d"  %(cu,hav),
+            print "addemO %s have %3d"  %(cu,hav),
             qty=self.othqty - hav
             if qty <0:
-                print "have more than needed"
+                print "more than needed "+str(self.othqty)
                 continue
             qty=self.offqty(hav,qty)
-            self.neworder(qty,cu) 
+            self.neworderOwn(qty,cu) 
             nord+=1           
         print "addemO terminated with %d" %nord
         return nord
@@ -306,10 +343,10 @@ class greed():
         for cu in sorted(self.need, key=self.need.__getitem__,reverse=True):
             if nord >4: return 
             if cu in self.order:
-                print "addem already ordered "+cu
+                print "addem1 %s already ordered "%cu
                 continue
             if cu not in self.want:
-                print "addem not wanted "+cu
+                print "addem1 %s not wanted "%cu
                 continue
             if cu in self.have:
                 hav=self.have[cu]
@@ -319,11 +356,64 @@ class greed():
             if self.low:
                 qty=2
                 if hav >0:
-                    print "addem low have "+cu
+                    print "addem1 %s low have"%cu
                     continue
-            self.neworder(qty,cu) 
+            self.neworderOwn(qty,cu) 
             nord+=1
-            
+ 
+    def addemTop(self):
+        "order from top list, return number of orders in book"
+        nord=len(self.order)
+        cus=(self.db.getTop())    
+        for cu in cus:
+            if nord >4: 
+                return nord 
+            if cu==self.mycu:
+                continue
+            if cu in self.order:
+                print "addemO already ordered "+cu
+                continue
+            self.neworderOwn(self.ordqty,cu) 
+            self.db.delTop(cu)
+            nord+=1           
+        print "addemO terminated with %d" %nord
+        return nord
+ 
+    def addemValua(self):
+        "order from top list, return number of orders in book"
+        wnt=[]
+        giv=[]
+        for cu in self.have:
+            if self.have[cu]>3:
+                if cu in self.valua:
+                    print "my valuable: %s %d "%(cu,self.have[cu])
+                    giv.append(cu)
+                    
+            else:
+                if cu in self.order:
+                    print "already ordered "+cu
+                else:
+                    if self.have[cu]==0:
+                            wnt.append(cu)
+        print " can buy "+str(wnt)
+        if len(giv)==0:
+            return
+        random.shuffle(wnt)
+        random.shuffle(giv)
+        
+        nord=len(self.order)            
+        j=0
+        for i in range (0,len(wnt)):
+            if nord > 4 :
+                return
+            tcu=giv[j]   
+            j+=1             
+            if j>=len(giv):
+                j=0
+            self.neworder(1,tcu,wnt[i])
+            nord+=1
+        
+        
     def schluss(self):
         self.driver.quit()
         
@@ -362,14 +452,26 @@ class greed():
                 print "after woba2 "+str(my)+" "+self.mycu        
         else:
             self.low=False
-            
+
+    def onegoTop(self):
+        self.getMyOrders()
+        gib=self.addemTop()
+        self.db.setHave(self.myuser,self.have)
+        
+                    
     def onego(self):
         self.wobex()
+        self.bought=[]
+        if self.mytyp=="T":
+            self.onegoTop()   
+            return
         tmp=1
         cnt=6
         print "onego with cnt %d" %cnt
         if len(self.order)==5:
-            if random.randint(1,3)==2:
+            ra=random.randint(1,3)
+            print "onego checkremove %d"%(ra)            
+            if ra==2:
                 self.removelastorder()
         while tmp>0:
             cnt-=1
@@ -385,14 +487,18 @@ class greed():
                 print"onego  not enough online"
                 self.wobex()
                 self.trading()
-                self.addem1()
+                self.addemValua()
+        elif self.mytyp=="V":
+            oib=self.addemValua()
+            if oib<5:
+                pass
         else:
             self.addem1()
         self.db.setHave(self.myuser,self.have)
         self.trading()
-        
+  
+
     def gettask(self):
-            self.db.cst.execute("SELECT id,cmd from task where user='"+self.myuser+"' and done=''")
             for (tid,cmd) in self.db.cst:
                 print "Doit: "+str(cmd)+" tid="+str(tid)
                 if cmd== "stop":
@@ -421,31 +527,36 @@ class greed():
             tmpL="Lo"
         else:
             tmpL="  "
-        print "========================"
         print "%s %s %s need=%d ord=%d "%(self.myuser,self.db.zeit(),tmpL,self.needqty,self.ordqty)
         while 1:
             self.db.db.commit()
-            for cnt in range(0,10):
-                time.sleep(1)
-                if msvcrt.kbhit():
-                    break
-            acnt+=1
-            print "\b.",
-            if acnt>self.action:
+            if acnt>0:
+                for cnt in range(0,10):
+                    time.sleep(1)
+                    if msvcrt.kbhit():
+                        break
+            acnt-=1
+            print "\b\b\b\b%3d"%acnt,
+            if acnt<1:
                 self.onego()
-                acnt=0
+                acnt=self.action
             if msvcrt.kbhit():
                 tmp= msvcrt.getch()      
                 print tmp+"\n"
                 self.printSetUp()
-                print str(self.order)
+                print "orders:"+ str(self.order)
                 if tmp=="a":
                     print str(self.getPlayersOn())
                 if tmp=="c":
                     print str(self.getCursOn())
+                if tmp=="m":
+                    self.db.setTop(self.myuser)
+                    acnt=0
+                if tmp=="n":
+                    self.onegoTop()
                 if tmp=="o":
                     self.onego()
-                    acnt=0
+                    acnt=self.action
                 if tmp=="p":
                     print "pause",
                     msvcrt.getch()    
@@ -455,27 +566,29 @@ class greed():
                     self.setUp(self.myuser)
                 if tmp=="t":
                     self.trading()
+                if tmp=="v":
+                    self.addemValua()
                 if tmp=="w":
                     self.want=self.db.getWanted(self.mycu)
-                if tmp=="?":
+                if tmp==" ":
                     print \
                     """ 
    active players
    currencies on
+   many orders
    one go
    pause
    remove last order
    setup 
    trading
-   wanted """
-                print "?/a/c/o/p/r/s/t/w/q>",                   
+   wanted refresh   """
+                print "?/a/c/m/o/p/r/s/t/w/q>  ",                   
                 
         
 if __name__ == "__main__":
     g=greed()
     g.setUp(g.db.getUserOn())
     g.login()
-    g.onego()
     g.doit()
     
     
