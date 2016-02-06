@@ -1,55 +1,68 @@
 import time
 import random
 import msvcrt
+import sys
 from selenium import webdriver
 from gdb import gdb
 class greed():
  
     def __init__(self):
         self.db=gdb()        
-        self.driver = webdriver.Firefox()
-        self.driver.implicitly_wait(3)
+        self.driver = webdriver.Chrome('C:/greed/chromedriver.exe')
+        self.driver.implicitly_wait(5)
         self.base_url = "http://www.greedgame.com/"
-        #self.verificationErrors = []
-        #self.accept_next_alert = True
-        self.order=[]
-        self.have={}        # set in worldbank, 0 added during makeneed
+        self.order=[]       # my orders
+        self.have={}        # set in worldbank, 0s added during makeneed
         self.low=True
-        self.offered=[]
+        self.offered=[]     # offered by others
         self.valua=[]       # those cu not having a player assigned
+        self.dont=[]        # do not order in val
         self.need={}        # qty needed
-        self.want=[]
-        self.bought=[]      # key to bought to avoid 
+        self.want=[]        # 
+        self.bought=[]      # key to bought to avoid errors
+        self.phase="n"      # see desc
         
     def printSetUp(self):
-        print "%s %s ty=%s ord=%d need=%d exc=%d oth=%d act=%d" %(self.myuser,self.mycu,\
-            self.mytyp,self.ordqty,self.needqty,self.excqty,self.othqty,self.action)
+        print "%s %s ty=%s ord=%d need=%d exc=%d oth=%d act=%d odl=%d rem=%d" %(self.myuser,self.mycu,\
+            self.mytyp,self.ordqty,self.needqty,self.excqty,self.othqty,self.action,self.orddelt,self.remo)
         
     def setUp(self,user):
         se=self.db.getUserData(user)
         self.myuser=se[0]
         self.mypasswd=se[1]
         self.mycu=se[2]       
-        self.mytyp=se[3]    
-        self.ordqty=se[4] 
-        self.needqty=se[5]
-        self.excqty=se[6]
-        self.othqty=se[7]        
-        self.action=se[8]        
+        self.mytyp=se[3]    # 
+        self.ordqty=   se[4]   # max order qty
+        self.needqty=  se[5]   #
+        self.excqty=   se[6]   # worldbank if below
+        self.othqty=   se[7]   # order if below from other players     
+        self.action=   se[8]   # loop      
+        self.delay=    se[9]   # wait after order
+        self.orddelt= se[10]   # Delta for accepting orders if not low
+        self.remo=    se[11]   # p(removing)
         self.printSetUp()
         self.want=self.db.getWanted(self.mycu)
         self.valua=self.db.getValua()
+        self.dont=self.db.getDont()
+        self.printSetUp()
        
+    def sleepOrKey(self,sec):
+        print "\b\b>",
+        for cnt in range(0,sec):
+            if msvcrt.kbhit():
+                return msvcrt.getch()
+            time.sleep(1)
+        return ""
+        
     def evalPlayer(self,x):
         "returns all player "
         x=x.find_elements_by_class_name("player")
-        print "eval: %s" %(len(x))
         r=[]
         for z in x:
             r.append(z.text)
         return r
         
-    def playerAll(self):
+    def getPlayersAll(self):
         d = self.driver
         d.get(self.base_url+"stats") 
         x=d.find_element_by_class_name("row")
@@ -93,11 +106,17 @@ class greed():
         time.sleep(2)
         x=d.find_element_by_id('invest-to-select')
         ret = x.text[-10:]
+        print "ret >%s<"%ret
         if ret=="more coins":
             self.low=True
             return 1
+        if ret==" more coin":
+            self.low=True
+            return 1            
         bu=d.find_element_by_xpath('/html/body/div/div[3]/div[2]/div[1]/form/button')
         bu.click()       
+        print "Clicked"
+        self.sleepOrKey(2)
         self.low=False
         return 0
         
@@ -110,13 +129,14 @@ class greed():
         #d.get("http://www.whatsmyip.de/")
         #x=d.find_element_by_id("content")
         #x=x.find_element_by_tag_name("h3")
-        #print "Login using "+x.text
         d.get(self.base_url)
         d.find_element_by_link_text("Click here to log in").click()
         d.find_element_by_name("username").send_keys(self.myuser)
         d.find_element_by_name("password").send_keys(self.mypasswd)
         d.find_element_by_css_selector("fieldset > button.btn").click()
-  
+        print "Login using %s %s"%(self.myuser,self.mypasswd)
+        self.sleepOrKey(2)
+        
     def addoffered(self,cu):
         if cu not in self.offered: 
             self.offered.append(cu)  
@@ -124,6 +144,7 @@ class greed():
     def makeneed(self):
         " those offered minus having"
         self.need={}
+        random.shuffle(self.offered)
         for cu in self.offered:
             try:
                 tmp = self.needqty-self.have[cu]  
@@ -144,13 +165,36 @@ class greed():
                 tmp=self.needqty
             if tmp<0:
                 tmp=0
-            self.need[cu]=tmp            
+            self.need[cu]=tmp      
             
+    def finalize(self):
+        self.need={}
+        for cu in self.want:
+            try:
+                tmp = self.needqty-self.have[cu]  
+            except Exception as inst:
+                self.have[cu]=0
+                tmp=self.needqty
+            if tmp<0:
+                tmp=0
+            else:
+                tmp=(tmp/5)*5+5
+            self.need[cu]=tmp
+        print("Final "+str(self.need))  
+        cnt=6
+        for cu in sorted(self.need, key=self.need.__getitem__,reverse=True):          
+            qty=self.need[cu]
+            print "%s for %4d"%(cu,qty)
+            self.neworderOwn(qty,cu)
+            cnt-=1
+            if cnt<1:
+                return
+                
     def checkbuy(self):
         try:
             suc=self.driver.find_elements_by_class_name("success")
         except Exception as inst:
-            print "trading succ: "+str(inst.args)
+            print "checkbuy exc: "+str(inst.args)
             suc=[]
             return 0
         for r in suc:       
@@ -166,6 +210,10 @@ class greed():
                 gethav= self.have[getcu]
             else:
                 gethav=0;
+            if givcu in self.have:
+                pass
+            else:
+                self.have[givcu]=0;                
             givhav=self.have[givcu]
             print "canbuy %2d %s (%2d) give %2d %s (%2d) "\
             %(getqty,getcu,gethav,givqty,givcu,givhav),
@@ -178,16 +226,16 @@ class greed():
                 if gethav==0:
                     dlt=0
                 else:
-                    dlt=5
+                    dlt=self.orddelt
             getnew=gethav+getqty
-            givnew=givhav-givqty                
-            print "->  %2d  vs %2d " %(getnew,givnew),
+            givnew=givhav-givqty    
+            diff= givnew - getnew -dlt           
+            print "->  %2d  vs %2d D%3d" %(getnew,givnew,diff),
             if givcu in self.valua:
                 print "valu ",
                 if gethav !=0:
                     print "da"
                     continue
-                
             bou=getcu+givcu+str(getqty)+str(givqty)
             if bou in self.bought:
                 print "key already bought "+bou
@@ -201,9 +249,13 @@ class greed():
                     continue
             if givnew > getnew+dlt:
                     bu=r.find_element_by_link_text("buy")
-                    print "buy key "+bou
-                    self.bought.append(bou)
                     bu.click()
+                    print "buy key %s "%(bou)
+                    # print "buy key %s givnew %d %s getnew %d %s "%(bou,givnew,givcu,getnew,getcu)
+                    self.have[givcu]=givnew
+                    self.have[getcu]=getnew
+                    self.bought.append(bou)
+                    time.sleep(1)
                     return getqty
             print
         return 0
@@ -240,15 +292,16 @@ class greed():
         except Exception as inst:
             print "getMyOrders info: "+str(inst.args)
             rem=[]
-        print "Ordered: ",
+        print "getmyO: ",
         for r in rem:       
             y=r.find_elements_by_tag_name("li")
             #my=y[0].get_attribute("data-coin")
             cu=y[1].get_attribute("data-coin")
             print cu+" ", 
             self.order.append(cu)
-        print
-
+        tmp=len(self.order)
+        print "  tot "+str(tmp)
+        return tmp
         
     def trading(self):
         self.getMyOrders()
@@ -260,7 +313,8 @@ class greed():
         d.get(self.base_url+"newoffer")
         x=d.find_element_by_name('M['+givcu+']')
         x.clear()
-        print "neworder %d  %s %s" %(qty,givcu,getcu)
+        sl=random.randint(8,self.delay)
+        print "neworder %d %s %s   sleep %d"%(qty,givcu,getcu,sl)
         if self.low:
             if qty>2: qty=2
         tmp=str(qty)
@@ -269,7 +323,7 @@ class greed():
         x.clear()
         x.send_keys(tmp)
         d.find_element_by_xpath("//button[@type='submit']").click()
-        time.sleep(random.randint(10,20))
+        self.sleepOrKey(sl)
     
     def neworderOwn(self,qty,cu):
         self.neworder(qty,self.mycu,cu)
@@ -285,6 +339,7 @@ class greed():
         l=len(rem)
         if l== 0: return 0
         rem[l-1].click()
+        self.sleepOrKey(3)
         self.getMyOrders()
         return l-1
     
@@ -299,90 +354,113 @@ class greed():
         elif have <8:
             t= 4
         elif have <18:
-            t= 6
+            t= 5         
         else:
-            t=12
+            t=self.ordqty
+        if self.low:
+            if have>0:
+                print "Am Low and Have"
+                t=0
+            else:
+                t=2
         if t>self.ordqty:
             t=self.ordqty
+        
         return t
             
     def addemO(self):
-        "order by players Online, return number of orders in book"
-        nord=len(self.order)
-        curs=(self.getCursOn())    
+        "order for players Online, return number of orders in book"
+        mynam="addemO "
+        nord=self.getMyOrders()
+        curs=(self.getCursOn()) 
         for cu in curs:
             if nord >4: 
-                return nord 
+                break
             if cu==self.mycu:
                 continue
             if cu in self.order:
-                print "addemO %s already ordered "%cu
+                print mynam+"%s already ordered "%cu
                 continue
             if cu not in self.want:
-                print "addemO %s not wanted "%cu
+                print mynam+"%s not wanted "%cu
                 continue
             if cu in self.have:
                 hav=self.have[cu]
             else:
                 hav=0
-            print "addemO %s have %3d"  %(cu,hav),
+            print mynam+"%s have %3d"  %(cu,hav),
             qty=self.othqty - hav
             if qty <0:
                 print "more than needed "+str(self.othqty)
                 continue
             qty=self.offqty(hav,qty)
-            self.neworderOwn(qty,cu) 
-            nord+=1           
-        print "addemO terminated with %d" %nord
+            if qty>0:
+                self.neworderOwn(qty,cu) 
+                nord+=1           
+        print mynam+"terminated with %d" %nord
         return nord
         
     def addem1(self):
-        "order strategy by prio"
-        nord=len(self.order)
-        print "addem "+str(self.need)
+        "order those in self.wanted"
+        mynam="addem1 "
+        if self.phase=="h":
+            print mynam+"skipped for phase >"+self.phase+"<"
+            return
+        nord=self.getMyOrders()
+        print mynam+"need "+str(self.need)
         for cu in sorted(self.need, key=self.need.__getitem__,reverse=True):
-            if nord >4: return 
+            if nord >4:
+                break
             if cu in self.order:
-                print "addem1 %s already ordered "%cu
+                print mynam+"%s already ordered "%cu
                 continue
             if cu not in self.want:
-                print "addem1 %s not wanted "%cu
+                print mynam+"%s not wanted "%cu
                 continue
             if cu in self.have:
                 hav=self.have[cu]
             else:
                 hav=0
+            qty=self.othqty - hav
+            if qty <0:
+                print mynam+"%s more than needed "%cu+str(self.othqty)
+                continue
             qty=self.offqty(hav,self.need[cu])
-            if self.low:
-                qty=2
-                if hav >0:
-                    print "addem1 %s low have"%cu
-                    continue
+            if qty==0:
+                print mynam+"%s qty is zero "%cu
+                continue
             self.neworderOwn(qty,cu) 
             nord+=1
- 
+        print mynam+"terminated with %d" %nord
+        return nord
+        
     def addemTop(self):
         "order from top list, return number of orders in book"
-        nord=len(self.order)
-        cus=(self.db.getTop())    
+        mynam="addemTop "
+        nord=self.getMyOrders()
+        cus=(self.db.getTop())   
+        print "addemTop Entering"
         for cu in cus:
             if nord >4: 
-                return nord 
+                break
             if cu==self.mycu:
                 continue
             if cu in self.order:
                 print "addemO already ordered "+cu
                 continue
+            
             self.neworderOwn(self.ordqty,cu) 
             self.db.delTop(cu)
             nord+=1           
-        print "addemO terminated with %d" %nord
+        print "addemTop terminated with %d" %nord
         return nord
  
     def addemValua(self):
-        "order from top list, return number of orders in book"
+        "order valuables"
+        mynam="addemV "
         wnt=[]
         giv=[]
+        print mynam+"Entering"
         for cu in self.have:
             if self.have[cu]>3:
                 if cu in self.valua:
@@ -391,9 +469,12 @@ class greed():
                     
             else:
                 if cu in self.order:
-                    print "already ordered "+cu
+                    print "already ordered "+cu                    
                 else:
                     if self.have[cu]==0:
+                        if cu in self.dont:
+                            print "not dont "+cu                    
+                        else:
                             wnt.append(cu)
         print " can buy "+str(wnt)
         if len(giv)==0:
@@ -401,18 +482,19 @@ class greed():
         random.shuffle(wnt)
         random.shuffle(giv)
         
-        nord=len(self.order)            
+        nord=self.getMyOrders()            
         j=0
         for i in range (0,len(wnt)):
             if nord > 4 :
-                return
+                break
             tcu=giv[j]   
             j+=1             
             if j>=len(giv):
                 j=0
             self.neworder(1,tcu,wnt[i])
             nord+=1
-        
+        print mynam+"terminated with %d" %nord
+        return nord
         
     def schluss(self):
         self.driver.quit()
@@ -441,7 +523,7 @@ class greed():
             my=self.have[self.mycu]
         else:
             my=0
-            print "No more own coins!"      
+            print "No more own coins!"  
         time.sleep(1)   
         if my<self.excqty:
             tmp=self.xchange()
@@ -452,27 +534,23 @@ class greed():
                 print "after woba2 "+str(my)+" "+self.mycu        
         else:
             self.low=False
-
-    def onegoTop(self):
+    
+    def checkremove(self):
         self.getMyOrders()
-        gib=self.addemTop()
-        self.db.setHave(self.myuser,self.have)
-        
-                    
-    def onego(self):
-        self.wobex()
-        self.bought=[]
-        if self.mytyp=="T":
-            self.onegoTop()   
-            return
+        if len(self.order)==5:
+            ra=random.randint(1,10)
+            re=self.remo
+            print "checkremove %d p %d"%(ra,re)            
+            if ra>re:
+                self.removelastorder() 
+        else:
+            print "checkremove nix"
+
+    def match(self):
+        "match all avail orders"
         tmp=1
         cnt=6
-        print "onego with cnt %d" %cnt
-        if len(self.order)==5:
-            ra=random.randint(1,3)
-            print "onego checkremove %d"%(ra)            
-            if ra==2:
-                self.removelastorder()
+        self.wobex()
         while tmp>0:
             cnt-=1
             tmp=self.trading()
@@ -481,23 +559,87 @@ class greed():
                 self.wobex()
             if cnt<1: 
                 tmp=0
-        if self.mytyp=="O":
-            oib=self.addemO()
-            if oib<5:
-                print"onego  not enough online"
-                self.wobex()
-                self.trading()
+    
+    def onegoTop(self):
+        self.getMyOrders()
+        self.addemTop()
+        
+    def onegoNor(self):
+        self.bought=[]
+        self.checkremove()
+        mynam="onegNor "
+        print mynam+"starting"
+        self.match()
+        oib=self.getMyOrders()                
+        if oib<5:
+            self.addemO()
+            oib=self.getMyOrders()                               
+        if oib<5:       
+            if self.mytyp!="I":
                 self.addemValua()
-        elif self.mytyp=="V":
-            oib=self.addemValua()
-            if oib<5:
-                pass
-        else:
+                oib=self.getMyOrders() 
+        if oib<5:            
             self.addem1()
-        self.db.setHave(self.myuser,self.have)
-        self.trading()
+    
+    def onegoVal(self):
+        self.bought=[]
+        self.checkremove()
+        mynam="onegVal "
+        print mynam+"starting"
+        self.checkremove()
+        self.match()
+        self.addemValua()
+                    
+    def onego(self):
+        #  phase                  add0   add1  val   upd
+        #    auction                                 yes
+        #    high  =no waiting  
+        #    intraday             
+        #    normal
+        #  typ
+        #    I  no                             No
+        try:
+            self.wobex()
+            self.bought=[]
+            if self.mytyp=="T":
+                self.onegoTop()   
+            elif self.mytyp=="V":
+                self.onegoVal()   
+            elif self.mytyp=="N":
+                self.onegoNor()
+            elif self.mytyp=="I":     #intraday
+                self.onegoNor()            
+            else:
+                print "Please set typ T/V/N"
+            self.db.setHave(self.myuser,self.have)
+            self.trading()
+        except Exception as inst:
+            print "onego exc: "+str(inst.args)
   
-
+    def doUpOne(self,pl2):
+        pl1=self.myuser
+        self.db.createSummary()
+        t1=self.db.getGivTo(pl1,pl2)
+        print pl1+ " gives to " + pl2+ "  "+str(t1)
+        t2=self.db.getGivTo(pl2,pl1)
+        print pl2+ " gives to " + pl1+ "  "+str(t2)
+        num=min(len(t1),len(t2))
+        for cnt in range(0,num):
+            print "duUp %s %s "%(t1[cnt],t2[cnt])
+            self.neworder(1,t1[cnt],t2[cnt])
+    
+    def doUp(self):
+        t=self.getPlayersOn()
+        for cnt in range(0,len(t)):
+             if t[cnt]==self.myuser:
+                 continue
+             t1=self.db.getUsersCur(t[cnt])
+             if t1==None:
+                  continue
+             print "try %s"%t[cnt]
+             self.doUpOne(t[cnt])
+            
+            
     def gettask(self):
             for (tid,cmd) in self.db.cst:
                 print "Doit: "+str(cmd)+" tid="+str(tid)
@@ -522,7 +664,7 @@ class greed():
                 self.db.doneTask(tid)                                  
         
     def doit(self):
-        acnt=0
+        acnt=20
         if self.low:
             tmpL="Lo"
         else:
@@ -539,50 +681,91 @@ class greed():
             print "\b\b\b\b%3d"%acnt,
             if acnt<1:
                 self.onego()
-                acnt=self.action
+                self.phase=self.db.getPhase()
+                print self.myuser+" phase >"+self.phase+"< ",
+                if self.phase=="h":
+                    print "HIGH ACT"
+                    acnt=5
+                else:
+                    acnt=self.action
             if msvcrt.kbhit():
                 tmp= msvcrt.getch()      
                 print tmp+"\n"
                 self.printSetUp()
-                print "orders:"+ str(self.order)
                 if tmp=="a":
                     print str(self.getPlayersOn())
                 if tmp=="c":
                     print str(self.getCursOn())
-                if tmp=="m":
-                    self.db.setTop(self.myuser)
-                    acnt=0
+                if tmp=="d":
+                   self.removeall()   
+                if tmp=="f":
+                   self.finalize()         
+                if tmp=="h":
+                    self.db.setHave(self.myuser,self.have)
                 if tmp=="n":
                     self.onegoTop()
                 if tmp=="o":
-                    self.onego()
-                    acnt=self.action
+                    acnt=0
                 if tmp=="p":
                     print "pause",
                     msvcrt.getch()    
+                if tmp=="q":
+                    self.db.setHave(self.myuser,self.have)
+                    self.schluss()
+                    sys.exit(0)                      
                 if tmp=="r":
                     self.removelastorder()
                 if tmp=="s":
                     self.setUp(self.myuser)
                 if tmp=="t":
                     self.trading()
-                if tmp=="v":
-                    self.addemValua()
+                if tmp=="u":
+                    self.doUp()
                 if tmp=="w":
                     self.want=self.db.getWanted(self.mycu)
+                if tmp=="x":
+                    self.wobex()
+                if tmp=="y":
+                    pli=self.getPlayersAll()
+                    self.db.setPlayers(pli) 
+                    print "Players extracted: %d"%len(pli)
+                if tmp=="z":
+                    self.db.createSummary()                    
+                if tmp=="1":
+                    self.addem1()
+                if tmp=="2":
+                    self.addemO()
+                if tmp=="3":
+                    self.addemValua()
+                if tmp=="4":
+                    self.addemTop()
+                
                 if tmp==" ":
                     print \
                     """ 
-   active players
-   currencies on
+   Active players 
+   Currencies on
+   Delete all Orders
+   Finalize
+   set Have
    many orders
-   one go
-   pause
-   remove last order
+   One go
+   Pause
+   Quit
+   Remove last order
    setup 
    trading
-   wanted refresh   """
-                print "?/a/c/m/o/p/r/s/t/w/q>  ",                   
+   doUp
+   wanted refresh 
+   x wobex
+   y players upd
+   zummary
+   1 addem1
+   2 addem Online
+   3 addem Valua
+   4 addem Top
+   """
+                print self.myuser+" ?/a/c/m/o/p/r/s/t/w/q>  ",                   
                 
         
 if __name__ == "__main__":

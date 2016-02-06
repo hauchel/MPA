@@ -33,7 +33,6 @@ class gdb():
         self.db.commit()
         return result
     
-    
     def execc(self,query):
         self.say ("execc: "+query)     
         tmp=self.cs.execute(query)
@@ -62,6 +61,10 @@ class gdb():
     def getUserData(self,user):
         return self.fetch1("SELECT * from users where user='%s'" %user)        
   
+    def getPhase(self):
+        tmp=self.fetch1("SELECT level from phase")
+        return tmp[0]
+        
     def getWanted(self,ex):
         tmp=self.fetch99("SELECT cur from wanted order by prio")
         w=[]
@@ -94,6 +97,8 @@ class gdb():
             tmp=tmp+t1+str(h)+"',"+str(have[h])+"),"
         tmp=tmp[:-1]
         self.execc(tmp)  
+        self.execc("Delete from have where qty=0;")
+        print "setHave done"
     
     def setTop(self,user,cur):
         self.execc("Delete from top")
@@ -108,15 +113,20 @@ class gdb():
         
     def getValua(self):
         plr= self.getManyOne("select distinct cur from players")
-        print plr
+        print " Players: "+str(plr)
         val= self.getManyOne("select cur from coins") 
-        print val
         for cu in plr:
             try:
                 val.remove(cu)
             except ValueError:
                 print "please check players currency "+str(cu)
+        print  "Valuable: "+str(val)
         return val
+        
+    def getDont(self):
+        val= self.getManyOne("select cur from notorder;") 
+        print  "Do not: "+str(val)
+        return val        
         
     def createSummary(self):
         self.execc("delete from summary;")
@@ -131,6 +141,7 @@ class gdb():
         self.execc(tot)
         self.execc("update summary,players set summary.player=players.name where summary.cur=players.cur")
         self.execc("update summary,coins set summary.curLong=coins.curLong where summary.cur=coins.cur")
+        print "createSummary done"
         
     def getPlayersCur(self,plis):
         r=[]
@@ -145,7 +156,21 @@ class gdb():
             if tmp[0] not in r:
                 r.append(tmp[0])
         return r
-    
+
+    def getUsersCur(self,usr):
+        tmp=self.fetch1("select cur from users where user='%s'" %usr)
+        if tmp==None:
+            print "User not known "+usr
+            return None
+        return tmp[0]
+            
+    def getGivTo(self,pl1,pl2):
+        # returns all thos which pl1 could give to pl2
+        que="select cur from summary where "+pl2+"=0 and "+pl1+" >1 order by "+pl1+" desc;"
+        return self.getManyOne(que)
+  
+  
+  
     def testUp(self,user):
         se=self.getUserData(user)
         self.myuser=se[0]
@@ -158,7 +183,16 @@ class gdb():
 
 if __name__ == "__main__":
     k=gdb()  
-    print k.getValua()
+    pl1="R2D2"
+    pl2="greed"
+    if 0:
+        t1=k.getUsersCur('greed')
+        print " is "+str(t1)
+    if 1:
+        t1=k.getDont()
+        print " is "+str(t1)
+        
+
     if 0:
         print k.getPlayersCur([u'greed', u'capelca', u'Bleech', u'R2D2', u'Reb Rote'])
     if 0:
@@ -169,7 +203,7 @@ if __name__ == "__main__":
     if 0:
         k.setTop('R2D2','AR')
         print k.getTop()
-    if 1:
+    if 0:
         k.createSummary()        
     #tmp=k.getUserData(usr)
     #t=k.getWanted('EC')
