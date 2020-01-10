@@ -1,11 +1,15 @@
-
-;**************** 
+; SPI Interface for attiny x5
+; external defines required:
+;
+; Using
+; BufX
+; BufXEnd
+; XL XH   pointer to input buffer
+; YL YH   pointer to output buffer
+; ZH must be 0?
+; myGP, USIdirect
 ; put mess to USI
-StoreMes:
-	mov		tmp, mesDur
-	clr 	mesDur
-	rjmp	USI_PutCh ; which returns
-;**************** 
+
 ; get character in xBuf (XL+) into tmp
 USI_GetCh:
 	cp		XL,XH

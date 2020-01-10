@@ -1,4 +1,30 @@
-; 
+;Misc EEPROM and Fuse related  
+
+
+ReadFuses:
+; Reurns Fuses in tmpL, tmpH and tmp
+	push ZL
+	push ZH
+	in   sregEE,SREG
+	cli
+	clr ZL
+	clr ZH
+	ldi tmp, (1<<RFLB)|(1<<SELFPRGEN)
+	out SPMCSR,tmp
+	LPM tmpL,Z	;FBL at 0
+	ldi	ZL,3
+	out SPMCSR,tmp
+	LPM tmpH,Z	;FBH at 3
+	ldi	ZL,2
+	out SPMCSR,tmp
+	LPM tmp,Z	;FBH at 3
+; restore ints
+	out SREG,sregEE
+	pop ZH
+	pop ZL
+	ret
+
+
 EEPROM_Write:
 ; Write tmp to EEprom tmpH/L, uses sregEE
 ; Wait for completion of previous write

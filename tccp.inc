@@ -1,6 +1,6 @@
 ; contains routines to handle tccp
 ; Registers reserved:
-;
+; cnt0
 ;
 
 ; 
@@ -55,26 +55,40 @@ V24ReceiveAvail:
 
 V24Receive:
 USI_GetCh:
-; get character from BufRcv in tmp, Wait if nothing received
-;	PfiLow 		; Debug only Check for Counter value and set Pfi if not zero
-;	in tmp,USISR   
-;	andi tmp,0x0F
-;	breq UsiGetCh05
-;	pfiHigh
-UsiGetCh05:		; End Debug
+; returns char received in tmp
 	cp	bufRcvIP,bufRcvOP	
-	breq	USI_GetCh ; nothing in buffer, wait
+	brne	USI_GetChDa    	; get data from buffer
+	mov	tmp,	cnt0			; current counter
+	sbic UsiGP, gpUsiActive	
+	rjmp	USI_GetChWaitActive ; active...
+;inactive
+	andi tmp,0x3F
+USI_GetCh05:
+	brne	USI_GetCh10
+	LedOn				
+	rjmp	USI_GetCh
+USI_GetCh10:
+	LedOff				
+	rjmp	USI_GetCh
+USI_GetchWaitActive:
+	andi tmp,0x0F
+	rjmp	USI_Getch05
+
+
+	
+USI_GetchDa:
+	LedOn		
 	push	XL
 	push	XH
 	clr	XH 		; X always below 0x100
 	mov  XL, BufRcvOP
 	ld	tmp,	X+
 	cpi	XL, low(BufRcvEnd)
-	brne UsiGetCh10
+	brne UsiGetCh90
 ; Buffer end
 	ldi 	XL, low(BufRcv)
 ;store buffer
-UsiGetCh10:
+UsiGetCh90:
 	mov	BufRcvOP,XL
 ; restore regs
 	pop	XH
@@ -208,11 +222,25 @@ V24SendString_X:
 
 V24Send:
 USI_PutCh:
-; put character in BufSnd, no Overflow detection
+; put tmp in BufSnd, if Overflow wait
 	push	XL
 	push	XH
+	mov  XL, 	BufSndIP
+USI_PutChWait:
+	mov  XH,	BufSndOP	;snapshot if changed in between don't care
+; calc bytes used
+;   I      I     O ... I
+;   O       O    b     e
+; empty   don't   don't
+;    XH    1       -xx
+	sub	XH,XL
+	brcc	UsiPutCh05 ; O>I
+	subi	XH, BufSnd-BufSndEnd
+UsiPutCh05:
+	dec 	XH
+	breq USI_PutChWait
+UsiPutChOK:
 	clr	XH 		; always below 0x100
-	mov  XL, BufSndIP
 	st	X+,tmp
 	cpi	XL, low(BufSndEnd)
 	brne UsiPutCh10
@@ -246,7 +274,6 @@ USI_OVF: ;tiny 85 SPI Character received Interrupt Handler
 	reti	
 ; CME    for me: change to active and acknowledge
 UsiMakeActive:
-	sbi	USIDR, 4	; makes 1x
 	sbi	UsiGP, gpUsiActive
 	LedOn
 	PfiLow
